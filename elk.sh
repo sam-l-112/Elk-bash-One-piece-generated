@@ -69,4 +69,3 @@ cd ../dataset
 python import_dataset.py
 
 echo "🎉 ELK on K3s + Data import 完成！"
-
