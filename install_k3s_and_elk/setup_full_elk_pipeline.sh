@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --------------------------------------------
-# 📦 One‑Stop Installer: k3s + ELK + Filebeat + Data Pipeline
+# 📦 One‑Stop Installer: k3s + ELK + Filebeat + Data Pipeline (with API Key Support)
 # --------------------------------------------
 
 # === Phase 1: k3s + ELK Base Deployment ===
@@ -70,14 +70,16 @@ sudo apt-get update
 sudo apt-get install -y filebeat
 sudo systemctl enable filebeat
 
-read -rp "✍️ 是否要自動修改 Filebeat 設定檔？(y/N): " MODIFY_FB
-if [[ $MODIFY_FB == "y" || $MODIFY_FB == "Y" ]]; then
-  sudo sed -i "s/^.*username:.*/  username: \"elastic\"/" /etc/filebeat/filebeat.yml
-  sudo sed -i "s/^.*password:.*/  password: \"$ELASTIC_PASS\"/" /etc/filebeat/filebeat.yml
-  sudo sed -i "s/^.*verification_mode:.*/    verification_mode: \"none\"/" /etc/filebeat/filebeat.yml
-  echo "✅ Filebeat 配置已更新"
+read -rp "✍️ 是否要使用 API Key 註要驗證 (y/N)? " USE_API
+if [[ $USE_API == "y" || $USE_API == "Y" ]]; then
+  read -rp "🔐 請輸入 Elasticsearch API Key (Base64): " API_KEY
+  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*api_key:.*/  api_key: \"$API_KEY\"/" /etc/filebeat/filebeat.yml || echo -e "output.elasticsearch:\n  hosts: [\"https://localhost:9200\"]\n  api_key: \"$API_KEY\"\n  ssl.verification_mode: \"none\"" | sudo tee /etc/filebeat/filebeat.yml
+  echo "✅ Filebeat 配置已設定 API Key"
 else
-  echo "⚠️ 請手動修改 /etc/filebeat/filebeat.yml"
+  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*username:.*/  username: \"elastic\"/" /etc/filebeat/filebeat.yml
+  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*password:.*/  password: \"$ELASTIC_PASS\"/" /etc/filebeat/filebeat.yml
+  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*verification_mode:.*/  verification_mode: \"none\"/" /etc/filebeat/filebeat.yml
+  echo "✅ Filebeat 配置已設定 elastic 密碼"
 fi
 
 sudo filebeat test config
