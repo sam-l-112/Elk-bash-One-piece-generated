@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --------------------------------------------
-# 📦 One‑Stop Installer: k3s + ELK + Filebeat + Data Pipeline (with API Key Support)
+# 📦 One‑Stop Installer: k3s + ELK + Filebeat + Data Pipeline (with API Key from create_api_key.sh)
 # --------------------------------------------
 
 # === Phase 1: k3s + ELK Base Deployment ===
@@ -31,7 +31,6 @@ cd elk/
 helm repo add elastic https://helm.elastic.co || true
 helm repo update
 
-# Conditional install if not already present
 for chart in elasticsearch filebeat logstash kibana; do
   if helm list | grep -q "$chart"; then
     echo "⚠️ $chart is already installed. Skipping."
@@ -53,12 +52,14 @@ ELASTIC_PASS=$(kubectl get secret elasticsearch-master-credentials \
   -o jsonpath="{.data.password}" | base64 --decode)
 echo "→ elastic 帳號密碼: $ELASTIC_PASS"
 
-read -rp "🔑 請輸入 SSH 金鑰路徑 (預設: ~/.ssh/id_rsa): " SSH_KEY
-SSH_KEY=${SSH_KEY:-~/.ssh/id_rsa}
 read -rp "🌍 請輸入遠端 VCS IP 位置: " REMOTE_IP
-
-echo "🔗 SSH tunnel 指令:"
-echo "ssh -L 0.0.0.0:5601:localhost:5601 -i $SSH_KEY ubuntu@$REMOTE_IP"
+SSH_KEY=~/.ssh/id_rsa
+if [[ -f $SSH_KEY ]]; then
+  echo "🔗 SSH tunnel 指令:"
+  echo "ssh -L 0.0.0.0:5601:localhost:5601 -i $SSH_KEY ubuntu@$REMOTE_IP"
+else
+  echo "⚠️ 未找到 SSH 金鑰檔 ~/.ssh/id_rsa 請手動執行 SSH tunnel"
+fi
 
 # === Phase 4: Filebeat Install & Config ===
 echo "📥 Install Filebeat on host"
@@ -70,28 +71,33 @@ sudo apt-get update
 sudo apt-get install -y filebeat
 sudo systemctl enable filebeat
 
-read -rp "✍️ 是否要使用 API Key 註要驗證 (y/N)? " USE_API
-if [[ $USE_API == "y" || $USE_API == "Y" ]]; then
-  read -rp "🔐 請輸入 Elasticsearch API Key (Base64): " API_KEY
-  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*api_key:.*/  api_key: \"$API_KEY\"/" /etc/filebeat/filebeat.yml || echo -e "output.elasticsearch:\n  hosts: [\"https://localhost:9200\"]\n  api_key: \"$API_KEY\"\n  ssl.verification_mode: \"none\"" | sudo tee /etc/filebeat/filebeat.yml
-  echo "✅ Filebeat 配置已設定 API Key"
-else
-  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*username:.*/  username: \"elastic\"/" /etc/filebeat/filebeat.yml
-  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*password:.*/  password: \"$ELASTIC_PASS\"/" /etc/filebeat/filebeat.yml
-  sudo sed -i "/^output.elasticsearch:/,/^ *ssl:/ s/^.*verification_mode:.*/  verification_mode: \"none\"/" /etc/filebeat/filebeat.yml
-  echo "✅ Filebeat 配置已設定 elastic 密碼"
+# === Phase 5: Import Data Pipeline and Auto Extract API Key ===
+echo "🔄 Import sample data"
+cd elasticsearch
+
+bash go.sh || echo "⚠️ go.sh 執行失敗"
+bash create_api_key.sh > api_key_output.json
+
+ENCODED_KEY=$(grep -oP '"encoded"\s*:\s*"\K[^"]+' api_key_output.json | tail -n 1)
+if [[ -z "$ENCODED_KEY" ]]; then
+  echo "❌ 無法自動操作 API Key, 請手動執行 create_api_key.sh"
+  exit 1
 fi
+
+echo "🔐 Extracted API Key: $ENCODED_KEY"
+
+sudo tee /etc/filebeat/filebeat.yml > /dev/null <<EOF
+output.elasticsearch:
+  hosts: ["https://localhost:9200"]
+  api_key: "$ENCODED_KEY"
+  ssl.verification_mode: "none"
+EOF
 
 sudo filebeat test config
 sudo filebeat test output
 sudo systemctl restart filebeat
 
-# === Phase 5: Import Data Pipeline ===
-echo "🔄 Import sample data"
-cd elasticsearch
-bash go.sh
-bash create_api_key.sh
-bash test_api_key.sh
+bash test_api_key.sh || echo "⚠️ test_api_key.sh 失敗"
 
 read -rp "📅 是否啟用 dataset 匯入？(y/N): " IMPORT_DATA
 if [[ $IMPORT_DATA == "y" || $IMPORT_DATA == "Y" ]]; then
