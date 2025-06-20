@@ -42,7 +42,7 @@ done
 
 kubectl get all -n default
 
-# === Phase 3: SSH Tunnel & Password ===
+# === Phase 3: Password ===
 HOST_IP=$(hostname -I | awk '{print $1}')
 HOST_NAME=$(hostname)
 echo "📡 本機名稱: $HOST_NAME"
@@ -52,21 +52,14 @@ ELASTIC_PASS=$(kubectl get secret elasticsearch-master-credentials \
   -o jsonpath="{.data.password}" | base64 --decode)
 echo "→ elastic 帳號密碼: $ELASTIC_PASS"
 
-read -rp "🌍 請輸入遠端 VCS IP 位置: " REMOTE_IP
-SSH_KEY=~/.ssh/id_rsa
-if [[ -f $SSH_KEY ]]; then
-  echo "🔗 SSH tunnel 指令:"
-  echo "ssh -L 0.0.0.0:5601:localhost:5601 -i $SSH_KEY ubuntu@$REMOTE_IP"
-else
-  echo "⚠️ 未找到 SSH 金鑰檔 ~/.ssh/id_rsa 請手動執行 SSH tunnel"
-fi
-
 # === Phase 4: Filebeat Install & Config ===
 echo "📥 Install Filebeat on host"
-wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-sudo apt-get install -y apt-transport-https
-echo "deb https://artifacts.elastic.co/packages/9.x/apt stable main" | \
-  sudo tee /etc/apt/sources.list.d/elastic-9.x.list
+curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | \
+  sudo gpg --dearmor -o /usr/share/keyrings/elastic-keyring.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/elastic-keyring.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/elastic-9.x.list > /dev/null
+
 sudo apt-get update
 sudo apt-get install -y filebeat
 sudo systemctl enable filebeat
