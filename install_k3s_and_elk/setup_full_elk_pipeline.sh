@@ -28,12 +28,19 @@ kubectl get po -A
 # === Phase 2: Install ELK ===
 echo "📦 Deploy ELK via Helm"
 cd elk/
-helm repo add elastic https://helm.elastic.co
+helm repo add elastic https://helm.elastic.co || true
 helm repo update
-helm install elasticsearch elastic/elasticsearch -f elasticsearch/values.yml
-helm install filebeat elastic/filebeat -f filebeat/values.yml
-helm install logstash elastic/logstash -f logstash/values.yml
-helm install kibana elastic/kibana -f kibana/values.yml
+
+# Conditional install if not already present
+for chart in elasticsearch filebeat logstash kibana; do
+  if helm list | grep -q "$chart"; then
+    echo "⚠️ $chart is already installed. Skipping."
+  else
+    echo "⬆️ Installing $chart ..."
+    helm install $chart elastic/$chart -f $chart/values.yml
+  fi
+done
+
 kubectl get all -n default
 
 # === Phase 3: SSH Tunnel & Password ===
