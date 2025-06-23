@@ -8,7 +8,7 @@ cd AQUA-CARE-2025-June
 echo "🧰 Step 2: Setup Ansible Environment"
 bash tools/install_ansbile.sh
 source .venv/bin/activate
-pip install ansible requests joblib tqdm
+pip install --upgrade ansible requests joblib tqdm
 
 echo "🚀 Step 3: Install k3s using Ansible"
 ansible-playbook -i ansible/inventories/hosts.ini ansible/playbooks/install_k3s.yaml
@@ -28,13 +28,26 @@ kubectl get po -A
 echo "📦 Step 5: Install ELK Stack using Helm"
 cd elk/
 
-helm repo add elastic https://helm.elastic.co
+helm repo add elastic https://helm.elastic.co || true
 helm repo update
 
-helm install elasticsearch elastic/elasticsearch -f elasticsearch/values.yml
-helm install filebeat elastic/filebeat -f filebeat/values.yml
-helm install logstash elastic/logstash -f logstash/values.yml
-helm install kibana elastic/kibana -f kibana/values.yml
+declare -A CHARTS=(
+  [elasticsearch]="elasticsearch/values.yml"
+  [filebeat]="filebeat/values.yml"
+  [logstash]="logstash/values.yml"
+  [kibana]="kibana/values.yml"
+)
 
-echo "✅ ELK stack installed successfully."
+for CHART in "${!CHARTS[@]}"; do
+  if helm list -A | grep -q "^$CHART"; then
+    echo "✅ $CHART 已安裝，跳過"
+  else
+    echo "⬆️ Installing $CHART..."
+    helm install "$CHART" "elastic/$CHART" -f "${CHARTS[$CHART]}"
+    echo "⏳ 等待 $CHART 部署..."
+    sleep 15
+  fi
+done
+
+echo "✅ ELK stack 安裝完成，請稍候幾分鐘等待服務啟動。"
 kubectl get all -n default
